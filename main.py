@@ -1,5 +1,6 @@
 from sqlite3 import IntegrityError
 
+import bcrypt
 from database import create_tables, get_connection
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,7 @@ app = FastAPI(title="Wanderly Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -48,12 +49,19 @@ def register(user: User):
     connection = get_connection()
     cursor = connection.cursor()
 
+    hashed_password = bcrypt.hashpw(
+        user.password.encode("utf-8"),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
+
     try:
         cursor.execute(
             "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-            (user.name, user.email, user.password),
+            (user.name, user.email, hashed_password),
         )
+
         connection.commit()
+
         return {"message": "Registration successful!"}
 
     except IntegrityError:
@@ -69,15 +77,21 @@ def login(user: LoginData):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM users WHERE email = ? AND password = ?",
-        (user.email, user.password),
+        "SELECT password FROM users WHERE email = ?",
+        (user.email,),
     )
 
     result = cursor.fetchone()
     connection.close()
 
     if result:
-        return {"message": "Login successful!"}
+        stored_password = result[0]
+
+        if bcrypt.checkpw(
+            user.password.encode("utf-8"),
+            stored_password.encode("utf-8"),
+        ):
+            return {"message": "Login successful!"}
 
     return {"message": "Invalid email or password!"}
 
@@ -88,9 +102,12 @@ def contact(data: Contact):
     cursor = connection.cursor()
 
     cursor.execute(
-    "INSERT INTO contacts (name, email, subject, message) VALUES (?, ?, ?, ?)",
-    (data.name, data.email, data.subject, data.message),
-)
+        """
+        INSERT INTO contacts (name, email, subject, message)
+        VALUES (?, ?, ?, ?)
+        """,
+        (data.name, data.email, data.subject, data.message),
+    )
 
     connection.commit()
     connection.close()
